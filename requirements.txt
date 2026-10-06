@@ -1,0 +1,6 @@
+# Raspberry Pi / local bot
+musicdl>=2.0.0
+lark-oapi>=1.4.0
+requests>=2.32.0
+pathvalidate>=3.0.0
+tinytag>=2.0.0

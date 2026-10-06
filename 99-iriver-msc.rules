@@ -1,0 +1,11 @@
+# Copy to Raspberry Pi: /etc/udev/rules.d/99-iriver-msc.rules
+# Then: sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# 1. Plug the player in MSC / U-disk mode.
+# 2. Run: lsusb    and    lsblk -o NAME,PATH,SIZE,FSTYPE,LABEL,UUID,TRAN,VENDOR,MODEL
+# 3. Replace idVendor / idProduct below with your device.
+# 4. Prefer matching filesystem LABEL=IRIVER (rename the FAT volume once with fatlabel).
+
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="usb-storage", ENV{ID_FS_LABEL}=="IRIVER", ENV{DEVTYPE}=="partition", RUN+="/bin/mkdir -p /media/iriver", RUN+="/bin/mount -t vfat -o uid=1000,gid=1000,utf8,umask=000 $env{DEVNAME} /media/iriver"
+
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_FS_LABEL}=="IRIVER", RUN+="/bin/umount -l /media/iriver"

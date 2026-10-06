@@ -1,0 +1,15 @@
+[Unit]
+Description=Feishu remote control for Pi music station
+After=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/musicDownload-master
+EnvironmentFile=/home/YOUR_USER/musicDownload-master/feishu.env
+ExecStart=/home/YOUR_USER/musicDownload-master/.venv/bin/python3 /home/YOUR_USER/musicDownload-master/feishu_bot.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

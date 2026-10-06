@@ -1,0 +1,33 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+feishu.env
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# musicdl / runtime
+.musicdl_temp/
+已下载音乐/
+*.log
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Packaging
+/build/
+/dist/
+/*.spec

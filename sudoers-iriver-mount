@@ -1,0 +1,5 @@
+# Allow the music user to mount/unmount the player SD without a password.
+# Copy to /etc/sudoers.d/iriver-mount (chmod 440).
+# Replace pi with your Raspberry Pi username if it is not pi.
+
+YOUR_USER ALL=(root) NOPASSWD: /bin/mount, /bin/umount, /usr/bin/mount, /usr/bin/umount

@@ -1,0 +1,2 @@
+# Optional Mac desktop GUI (musicdownload.py)
+PySide6

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -91,7 +92,13 @@ def flatten_blocks(nodes: list, parent_tran: str = "", parent_vendor: str = "", 
     return result
 
 
+def is_system_device(c: BlockCandidate) -> bool:
+    return c.name.startswith("mmcblk0") or Path(c.path).name.startswith("mmcblk0")
+
+
 def looks_like_player_partition(c: BlockCandidate) -> bool:
+    if is_system_device(c):
+        return False
     if c.tran and c.tran.lower() != "usb":
         return False
     # Prefer partitions with a filesystem, not the whole disk.
@@ -200,6 +207,21 @@ def delete_local_audio(keyword: str, inbox: Path | None = None) -> str:
         return "请写成：删除本地 晴天\n清空全部请发：删除本地全部"
     matches = [p for p in files if keyword.lower() in str(p.relative_to(root)).lower()]
     if not matches:
+        # Prefer a literal title; only then remove spoken/listing decorations.
+        cleaned = re.sub(r"^(?:那首|这首)\s*", "", keyword).removeprefix("·").strip()
+        extensions = "|".join(re.escape(ext) for ext in sorted(AUDIO_EXTS))
+        listing = re.fullmatch(
+            rf"(.+(?:{extensions}))\s+\d+(?:\.\d+)?\s+(?:B|KB|MB|GB)",
+            cleaned,
+            re.I,
+        )
+        if listing:
+            # A copied list entry identifies one relative path, not a substring.
+            target = listing.group(1).lower()
+            matches = [p for p in files if str(p.relative_to(root)).lower() == target]
+        elif cleaned and cleaned not in {"全部", "所有", "*"}:
+            matches = [p for p in files if cleaned.lower() in str(p.relative_to(root)).lower()]
+    if not matches:
         return f"本地没有匹配「{keyword}」的歌曲。先发「盘」查看文件名。"
     names = []
     for p in matches:
@@ -240,8 +262,8 @@ def format_library_list() -> str:
             )
         )
         if not mounted_before:
-            unmount_if_ours(mounted)
-            lines.append("（本次只读已卸载，导入前请再插稳读卡器）")
+            if unmount_if_ours(mounted):
+                lines.append("（本次只读已卸载，导入前请再插稳读卡器）")
     except Exception as e:
         lines.append(f"【SD 卡】读取失败：{e}")
     return "\n".join(lines)
@@ -272,6 +294,8 @@ def pick_player_partition(blocks: List[BlockCandidate]) -> Optional[BlockCandida
 
 
 def ensure_mount(part: BlockCandidate, mount_point: Path = MOUNT_POINT) -> Path:
+    if is_system_device(part):
+        raise ValueError("拒绝访问系统盘 mmcblk0 及其分区")
     if part.mountpoint:
         return Path(part.mountpoint)
     mount_point.mkdir(parents=True, exist_ok=True)
@@ -335,10 +359,11 @@ def rsync_inbox(
     run(["sync"])
 
 
-def unmount_if_ours(mounted: Path, configured: Path = MOUNT_POINT) -> None:
+def unmount_if_ours(mounted: Path, configured: Path = MOUNT_POINT) -> bool:
     if mounted.resolve() != configured.resolve():
-        return
-    run(["sudo", "umount", str(configured)], check=False)
+        return False
+    run(["sudo", "-n", "umount", str(configured)])
+    return True
 
 
 def export_once(
@@ -362,7 +387,8 @@ def export_once(
         progress(f"同步 {source} → {target}")
     rsync_inbox(source, target, progress=progress)
     if unmount:
-        unmount_if_ours(mounted)
+        if not unmount_if_ours(mounted):
+            raise RuntimeError("曲目已复制，但未自动卸载非专用挂载点；请先安全弹出，勿直接拔卡")
         if progress:
             progress("已卸载，可以拔线")
     else:

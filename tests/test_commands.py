@@ -29,3 +29,19 @@ def test_allowlist(monkeypatch):
     assert allowed_open_id("ou_c") is False
     monkeypatch.setenv("FEISHU_ALLOW_OPEN_IDS", "")
     assert allowed_open_id("ou_a") is False
+
+
+def test_storage_commands():
+    assert parse_command('存储') == ('storage', '')
+    assert parse_command('导入预览') == ('import_preview', '')
+    assert parse_command('确认导入') == ('import_confirm', '')
+    assert parse_command('弹出SD') == ('eject_sd', '')
+
+
+def test_search_and_conflict_commands():
+    expected={'换一批':('search_next',''),'上一批':('search_previous',''),
+              '重新搜索':('search_retry',''),'只搜QQ 晴天':('search_source','QQ 晴天'),
+              '待处理 2':('import_issues','2'),'冲突详情 3':('import_issue_detail','3'),
+              '标记同曲 3':('import_same','3'),'跳过冲突 3':('import_skip','3'),
+              '确认新增 3':('import_add','3')}
+    for text,command in expected.items():assert parse_command(text)==command

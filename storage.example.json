@@ -1,0 +1,6 @@
+{
+  "source_uuid": "REPLACE-SOURCE-UUID",
+  "target_uuid": "REPLACE-TARGET-UUID",
+  "source_mount": "/home/shawpi/mnt/music-library",
+  "target_mount": "/media/iriver"
+}

@@ -110,21 +110,33 @@ def os_path_exists(p: Any) -> bool:
         return False
 
 
-def _newest_audio_since(root: Path, since: float) -> Optional[Path]:
+def _fresh_audio(path: Path, root: Path, before=None) -> bool:
+    if path.suffix.lower() not in AUDIO_EXTS or not path.is_file():
+        return False
+    if any(p.is_symlink() for p in (path, *path.parents)):
+        return False
+    if root.resolve() not in path.resolve().parents:
+        return False
+    stat = path.stat()
+    return stat.st_size > 0 and (before is None or before.get(path.resolve()) != (stat.st_size, stat.st_mtime_ns))
+
+
+def _newest_audio_since(root: Path, since: float, before=None) -> Optional[Path]:
     newest: Optional[Path] = None
     newest_mtime = since - 2
     if not root.is_dir():
         return None
     for p in root.rglob("*"):
-        if not p.is_file() or p.suffix.lower() not in AUDIO_EXTS:
+        if not _fresh_audio(p, root, before):
             continue
-        m = p.stat().st_mtime
+        stat = p.stat()
+        m = stat.st_mtime
         if m >= newest_mtime:
             newest, newest_mtime = p, m
     return newest
 
 
-def inspect_audio(path: Path, song_info: Optional[dict] = None) -> str:
+def inspect_audio(path: Path, song_info: Any = None) -> str:
     size = _human_size(path.stat().st_size)
     fmt = path.suffix.lstrip(".").upper() or "未知"
     bitrate = "未知"
@@ -161,34 +173,97 @@ def inspect_audio(path: Path, song_info: Optional[dict] = None) -> str:
     return "\n".join(lines)
 
 
-def search_and_download(keyword: str, work_dir: Path = INBOX_DEFAULT) -> Tuple[str, Path, str]:
+def _title_from_info(info: Any, fallback: str = "") -> str:
+    name = info.get("song_name", fallback) or fallback or "未知歌曲"
+    singers = info.get("singers", "")
+    if isinstance(singers, list):
+        singers = ", ".join(str(s) for s in singers)
+    return f"{name} - {singers}".strip(" -")
+
+
+def search_candidates(keyword: str, limit: int = 3, work_dir: Path = INBOX_DEFAULT, *, validate=None, sources=None, diverse=False) -> List[dict]:
     keyword = keyword.strip()
     if not keyword:
-        raise ValueError("歌名为空")
+        return []
+    if validate:
+        validate()
+    work_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir = work_dir / ".musicdl_temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    if sources and any(source not in DEFAULT_SOURCES for source in sources):
+        raise ValueError("不支持的音乐源")
+    client = _init_client(temp_dir, sources) if sources else _init_client(temp_dir)
+    results = client.search(keyword=keyword)
+    if validate:
+        validate()
+    buckets = []
+    seen = set()
+    for source, rows in (results or {}).items():
+        bucket = []
+        for item in rows or []:
+            if not callable(getattr(item, "get", None)):
+                continue
+            title = _title_from_info(item, keyword)
+            identity = (source, str(item.get("identifier") or title), str(item.get("album") or ""),
+                        str(item.get("ext") or ""), str(item.get("bitrate") or "")) if diverse else title
+            if identity in seen:
+                continue
+            seen.add(identity)
+            bucket.append({"title": title, "info": item, "source": source})
+        buckets.append(bucket)
+    if diverse:
+        # Give each source a turn; preserve alternatives across different sources.
+        out = [bucket[index] for index in range(max((len(x) for x in buckets), default=0))
+               for bucket in buckets if index < len(bucket)]
+    else:
+        out = [item for bucket in buckets for item in bucket]
+    return out[:max(0, limit)]
+
+
+def download_song_info(song_info: Any, work_dir: Path = INBOX_DEFAULT, *, validate=None) -> Tuple[str, Path, str]:
+    if validate:
+        validate()
     started = time.time()
     work_dir.mkdir(parents=True, exist_ok=True)
     temp_dir = work_dir / ".musicdl_temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
     client = _init_client(temp_dir)
-    results = client.search(keyword=keyword)
-    first = None
-    for rows in results.values():
-        if rows:
-            first = rows[0]
-            break
-    if not first:
-        raise RuntimeError(f"没有搜到：{keyword}")
-    name = first.get("song_name", keyword)
-    singers = first.get("singers", "")
-    if isinstance(singers, list):
-        singers = ", ".join(str(s) for s in singers)
-    downloaded = client.download(song_infos=[first])
-    audio = flatten_downloaded(downloaded, work_dir)
+    before = {p.resolve(): (p.stat().st_size, p.stat().st_mtime_ns)
+              for p in temp_dir.rglob("*") if p.is_file() and p.suffix.lower() in AUDIO_EXTS}
+    downloaded = client.download(song_infos=[song_info])
+    if validate:
+        validate()
+    songs = downloaded if isinstance(downloaded, (list, tuple)) else [downloaded]
+    fresh = []
+    for song in songs:
+        raw_path = _get_val(song, "save_path")
+        if not raw_path or not isinstance(raw_path, (str, Path)):
+            continue
+        path = Path(raw_path)
+        if not _fresh_audio(path, temp_dir, before):
+            continue
+        fresh.append(song)
+    audio = flatten_downloaded(fresh, work_dir)
     if audio is None:
-        audio = _newest_audio_since(work_dir, started)
-    title = f"{name} - {singers}"
+        audio = _newest_audio_since(temp_dir, started, before)
+        if audio:
+            meta = {key: song_info.get(key) for key in ("song_name", "singers", "album", "identifier")}
+            meta["save_path"] = audio
+            audio = flatten_downloaded(meta, work_dir)
+    title = _title_from_info(song_info)
     if audio:
-        details = inspect_audio(audio, first if isinstance(first, dict) else None)
+        details = inspect_audio(audio, song_info)
     else:
-        details = "未找到本地下载文件，无法读取大小/码率。"
+        raise RuntimeError("下载源未生成可确认的新音频文件，请重新搜索并换一个来源。")
     return title, work_dir, details
+
+
+def search_and_download(keyword: str, work_dir: Path = INBOX_DEFAULT, *, validate=None) -> Tuple[str, Path, str]:
+    keyword = keyword.strip()
+    if not keyword:
+        raise ValueError("歌名为空")
+    kwargs = {"validate": validate} if validate else {}
+    found = search_candidates(keyword, limit=1, work_dir=work_dir, **kwargs)
+    if not found:
+        raise RuntimeError(f"没有搜到：{keyword}")
+    return download_song_info(found[0]["info"], work_dir, **kwargs)

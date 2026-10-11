@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 feishu.env
+storage.json
 *.pem
 *.key
 id_rsa
